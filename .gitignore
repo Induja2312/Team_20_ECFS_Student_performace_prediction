@@ -1,0 +1,41 @@
+# virtual environment
+venv/
+env/
+
+# python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# uploaded files
+uploads/*
+!uploads/.gitkeep
+
+# reports
+reports/*
+!reports/.gitkeep
+
+# history sessions
+history/*
+!history/.gitkeep
+
+# model file (large binary)
+model/saved_model.pkl
+model/feature_weights.pkl
+
+# test and utility scripts
+test_speed.py
+check_risk.py
+check_threshold.py
+generate_labels.py
+
+# environment variables
+.env
+
+# IDE files
+.vscode/
+.idea/
+
+# windows
+Thumbs.db
+desktop.ini

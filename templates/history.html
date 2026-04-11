@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>EduPredict — Session History</title>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-icon">🎓</span>
+      <span class="brand-name">EduPredict</span>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/" class="nav-item"><span class="nav-icon">📂</span> Upload & Train</a>
+      <a href="/" class="nav-item"><span class="nav-icon">📋</span> Prediction Results</a>
+      <a href="/" class="nav-item"><span class="nav-icon">📊</span> Analytics Dashboard</a>
+      <a href="/" class="nav-item"><span class="nav-icon">🔍</span> Predict Student</a>
+      <a href="/" class="nav-item"><span class="nav-icon">📄</span> Download Report</a>
+      <a href="/history" class="nav-item active"><span class="nav-icon">🕐</span> History</a>
+    </nav>
+    <div class="sidebar-footer">EduPredict v1.0</div>
+  </aside>
+
+  <div class="main-wrapper">
+    <header class="topbar">
+      <div class="topbar-title">Session History</div>
+      <div class="topbar-right"></div>
+    </header>
+
+    <section class="page active" style="display:block">
+      <div class="page-header">
+        <h1>Session History</h1>
+        <p>All past upload sessions are listed below.</p>
+      </div>
+
+      {% if sessions %}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1.2rem">
+        {% for session in sessions %}
+        {% set d = session.data %}
+        <div class="card history-card">
+          <div class="history-timestamp">🕐 {{ session.timestamp | replace('_', ' ') }}</div>
+          <div class="history-stat">👥 Students: <strong>{{ d.predictions | length }}</strong></div>
+          <div class="history-stat">🌲 RF Accuracy: <strong>{{ d.rf_accuracy }}%</strong></div>
+          <div class="history-stat">📉 LR Accuracy: <strong>{{ d.lr_accuracy }}%</strong></div>
+          <div class="risk-row">
+            <span class="badge badge-safe">Safe: {{ d.risk_counts.Safe }}</span>
+            <span class="badge badge-risk">At Risk: {{ d.risk_counts['At Risk'] }}</span>
+            <span class="badge badge-danger">Danger: {{ d.risk_counts.Danger }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="card" style="text-align:center;padding:3rem">
+        <div style="font-size:3rem;margin-bottom:1rem">📭</div>
+        <p style="color:var(--muted);margin-bottom:1.5rem">No sessions yet. Upload a CSV to get started.</p>
+        <a href="/" class="btn btn-primary">Go to Upload</a>
+      </div>
+      {% endif %}
+    </section>
+  </div>
+
+</body>
+</html>

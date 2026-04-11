@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>EduPredict — Student Performance Predictor</title>
+  <link rel="stylesheet" href="/static/css/style.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-icon">🎓</span>
+      <span class="brand-name">EduPredict</span>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item active" data-page="upload">
+        <span class="nav-icon">📂</span> Upload & Train
+      </a>
+      <a href="#" class="nav-item" data-page="results">
+        <span class="nav-icon">📋</span> Prediction Results
+      </a>
+      <a href="#" class="nav-item" data-page="dashboard">
+        <span class="nav-icon">📊</span> Analytics Dashboard
+      </a>
+      <a href="#" class="nav-item" data-page="predict">
+        <span class="nav-icon">🔍</span> Predict Student
+      </a>
+      <a href="#" class="nav-item" data-page="report">
+        <span class="nav-icon">📄</span> Download Report
+      </a>
+      <a href="/history" class="nav-item">
+        <span class="nav-icon">🕐</span> History
+      </a>
+    </nav>
+    <div class="sidebar-footer">EduPredict v1.0</div>
+  </aside>
+
+  <!-- Main Content -->
+  <div class="main-wrapper">
+
+    <!-- Top Header -->
+    <header class="topbar">
+      <div class="topbar-title" id="pageTitle">Upload & Train</div>
+      <div class="topbar-right"></div>
+    </header>
+
+    <!-- PAGE: Upload & Train -->
+    <section class="page active" id="page-upload">
+      <div class="page-header">
+        <h1>Upload Student Data</h1>
+        <p>Upload a CSV file to train the model and generate predictions for all students.</p>
+      </div>
+
+      <div class="upload-card">
+        <div class="upload-zone" id="uploadZone">
+          <div class="upload-icon">📁</div>
+          <div class="upload-text">Drag & drop your CSV file here</div>
+          <div class="upload-sub">or click to browse</div>
+          <input type="file" id="csvFile" accept=".csv"/>
+        </div>
+        <div class="upload-info" id="uploadInfo" style="display:none">
+          <span class="file-icon">📄</span>
+          <span id="fileName"></span>
+          <button class="btn-clear" onclick="clearFile()">✕</button>
+        </div>
+        <div class="upload-hint">
+          Required columns: <code>name</code>, <code>attendance</code>, <code>marks</code>,
+          <code>study_hours</code>, <code>assignments_completed</code>, <code>result</code>
+        </div>
+        <button class="btn btn-primary btn-lg" onclick="uploadCSV()" id="uploadBtn">
+          🚀 Upload & Predict
+        </button>
+        <div id="uploadSpinner" class="spinner-wrap hidden">
+          <div class="spinner"></div>
+          <span>Training model and generating predictions...</span>
+        </div>
+        <div id="uploadError" class="alert alert-error hidden"></div>
+        <div id="uploadSuccess" class="alert alert-success hidden"></div>
+      </div>
+
+      <!-- What-If Simulator -->
+      <div class="section-title" style="margin-top:2rem">🎛️ What-If Simulator</div>
+      <div class="card">
+        <p class="card-desc">Adjust sliders to simulate a student's performance in real time.</p>
+        <div class="simulator-grid">
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Attendance</span><span class="slider-val" id="val_attendance">75</span><span>%</span>
+            </div>
+            <input type="range" id="s_attendance" min="0" max="100" value="75"
+              oninput="updateSim('attendance', this.value)"/>
+          </div>
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Marks</span><span class="slider-val" id="val_marks">60</span><span>/ 100</span>
+            </div>
+            <input type="range" id="s_marks" min="0" max="100" value="60"
+              oninput="updateSim('marks', this.value)"/>
+          </div>
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Study Hours</span><span class="slider-val" id="val_study_hours">5</span><span>/ week</span>
+            </div>
+            <input type="range" id="s_study_hours" min="0" max="20" value="5"
+              oninput="updateSim('study_hours', this.value)"/>
+          </div>
+          <div class="slider-group">
+            <div class="slider-label">
+              <span>Assignments</span><span class="slider-val" id="val_assignments_completed">6</span><span>/ 10</span>
+            </div>
+            <input type="range" id="s_assignments_completed" min="0" max="10" value="6"
+              oninput="updateSim('assignments_completed', this.value)"/>
+          </div>
+        </div>
+        <div id="simResult" class="sim-result">
+          <span class="sim-placeholder">Upload a CSV first to enable live predictions.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- PAGE: Prediction Results -->
+    <section class="page" id="page-results">
+      <div class="page-header">
+        <h1>Prediction Results</h1>
+        <p>View, search, and filter all student predictions from the last upload.</p>
+      </div>
+
+      <div class="card">
+        <div class="table-toolbar">
+          <div class="search-wrap">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="searchInput" placeholder="Search by name..." oninput="filterTable()"/>
+          </div>
+          <div class="filter-wrap">
+            <select id="filterResult" onchange="filterTable()">
+              <option value="">All Results</option>
+              <option value="Pass">Pass</option>
+              <option value="Fail">Fail</option>
+            </select>
+            <select id="filterRisk" onchange="filterTable()">
+              <option value="">All Risk Levels</option>
+              <option value="Safe">Safe</option>
+              <option value="At Risk">At Risk</option>
+              <option value="Danger">Danger</option>
+            </select>
+          </div>
+          <button class="btn btn-outline" onclick="downloadTableCSV()">⬇️ Download CSV</button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="data-table" id="resultsTable">
+            <thead>
+              <tr>
+                <th onclick="sortTable(0)">Name ↕</th>
+                <th onclick="sortTable(1)">Attendance (%) ↕</th>
+                <th onclick="sortTable(2)">Marks ↕</th>
+                <th onclick="sortTable(3)">Study Hours ↕</th>
+                <th onclick="sortTable(4)">Assignments ↕</th>
+                <th onclick="sortTable(5)">Prediction ↕</th>
+                <th>Risk Level</th>
+                <th>Confidence</th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody">
+              <tr><td colspan="8" class="empty-row">No data yet. Upload a CSV to see results.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- PAGE: Analytics Dashboard -->
+    <section class="page" id="page-dashboard">
+      <div class="page-header">
+        <h1>Analytics Dashboard</h1>
+        <p>Visual summary of model performance and student risk distribution.</p>
+      </div>
+
+      <!-- Summary Cards -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">👥</div>
+          <div class="stat-value" id="statTotal">—</div>
+          <div class="stat-label">Total Students</div>
+        </div>
+        <div class="stat-card stat-pass">
+          <div class="stat-icon">✅</div>
+          <div class="stat-value" id="statPass">—</div>
+          <div class="stat-label">Predicted Pass</div>
+        </div>
+        <div class="stat-card stat-fail">
+          <div class="stat-icon">❌</div>
+          <div class="stat-value" id="statFail">—</div>
+          <div class="stat-label">Predicted Fail</div>
+        </div>
+        <div class="stat-card stat-accuracy">
+          <div class="stat-icon">🎯</div>
+          <div class="stat-value" id="statAccuracy">—</div>
+          <div class="stat-label">Model Accuracy</div>
+        </div>
+      </div>
+
+      <!-- Top Factor Banner -->
+      <div class="top-factor-banner" id="topFactorBanner" style="display:none">
+        <span class="top-factor-label">🏆 Top Predictive Factor:</span>
+        <span class="top-factor-value" id="topFactor"></span>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="charts-row">
+        <div class="card chart-card">
+          <div class="card-title">Pass vs Fail Distribution</div>
+          <canvas id="riskPieChart"></canvas>
+        </div>
+        <div class="card chart-card">
+          <div class="card-title">Feature Importance</div>
+          <canvas id="featureBarChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Model Comparison -->
+      <div class="card">
+        <div class="card-title">Model Accuracy Comparison</div>
+        <div class="model-compare-row">
+          <div class="model-box">
+            <div class="model-name">🌲 Random Forest</div>
+            <div class="model-acc" id="rfAcc">—</div>
+            <div class="model-label">Accuracy</div>
+            <div class="acc-bar"><div class="acc-fill rf-fill" id="rfBar"></div></div>
+          </div>
+          <div class="model-box">
+            <div class="model-name">📉 Logistic Regression</div>
+            <div class="model-acc" id="lrAcc">—</div>
+            <div class="model-label">Accuracy</div>
+            <div class="acc-bar"><div class="acc-fill lr-fill" id="lrBar"></div></div>
+          </div>
+        </div>
+        <div id="confusionMatrix" class="confusion-box"></div>
+      </div>
+
+      <!-- Teacher Action Plan -->
+      <div class="card">
+        <div class="card-title">📋 Teacher Action Plan</div>
+        <ul id="actionPlan" class="action-list">
+          <li class="empty-row">Upload a CSV to generate action plan.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- PAGE: Predict Single Student -->
+    <section class="page" id="page-predict">
+      <div class="page-header">
+        <h1>Predict Student Performance</h1>
+        <p>Enter a student's details to instantly predict their performance.</p>
+      </div>
+
+      <div class="predict-form-wrap">
+        <div class="card predict-card">
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Attendance (%)</label>
+              <input type="number" id="m_attendance" min="0" max="100" placeholder="e.g. 80"/>
+            </div>
+            <div class="form-group">
+              <label>Marks (out of 100)</label>
+              <input type="number" id="m_marks" min="0" max="100" placeholder="e.g. 65"/>
+            </div>
+            <div class="form-group">
+              <label>Study Hours / Week</label>
+              <input type="number" id="m_study_hours" min="0" max="20" placeholder="e.g. 5"/>
+            </div>
+            <div class="form-group">
+              <label>Assignments Completed (out of 10)</label>
+              <input type="number" id="m_assignments" min="0" max="10" placeholder="e.g. 7"/>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-lg btn-full" onclick="manualPredict()">
+            🔍 Predict Performance
+          </button>
+
+          <div id="manualResult" class="predict-result hidden"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PAGE: Download Report -->
+    <section class="page" id="page-report">
+      <div class="page-header">
+        <h1>Download Report</h1>
+        <p>Export student prediction data in your preferred format.</p>
+      </div>
+
+      <div class="report-preview card" id="reportPreview">
+        <div class="card-title">📊 Report Summary Preview</div>
+        <div class="preview-stats" id="previewStats">
+          <span>Upload a CSV first to see report summary.</span>
+        </div>
+      </div>
+
+      <div class="report-grid">
+        <div class="card report-card">
+          <div class="report-icon">📊</div>
+          <div class="report-title">CSV Report</div>
+          <div class="report-desc">Download all student predictions as a spreadsheet. Open in Excel or Google Sheets.</div>
+          <button class="btn btn-outline btn-lg" onclick="downloadTableCSV()">⬇️ Download CSV</button>
+        </div>
+
+        <div class="card report-card">
+          <div class="report-icon">📄</div>
+          <div class="report-title">PDF Report</div>
+          <div class="report-desc">Download a formatted PDF report with summary table, accuracy scores, and risk distribution.</div>
+          <div class="form-group" style="margin-bottom:1rem">
+            <label>School Name</label>
+            <input type="text" id="schoolName" placeholder="Enter your school name"/>
+          </div>
+          <button class="btn btn-primary btn-lg" onclick="downloadReport()">⬇️ Download PDF</button>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- end main-wrapper -->
+
+  <script src="/static/js/charts.js"></script>
+  <script src="/static/js/simulator.js"></script>
+  <script src="/static/js/main.js"></script>
+</body>
+</html>
