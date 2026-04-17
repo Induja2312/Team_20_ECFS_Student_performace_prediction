@@ -41,14 +41,14 @@
         {% for session in sessions %}
         {% set d = session.data %}
         <div class="card history-card">
-          <div class="history-timestamp">🕐 {{ session.timestamp | replace('_', ' ') }}</div>
+          <div class="history-timestamp">📅 {{ session.date }} &nbsp;·&nbsp; 🕐 {{ session.time }}</div>
           <div class="history-stat">👥 Students: <strong>{{ d.predictions | length }}</strong></div>
           <div class="history-stat">🌲 RF Accuracy: <strong>{{ d.rf_accuracy }}%</strong></div>
           <div class="history-stat">📉 LR Accuracy: <strong>{{ d.lr_accuracy }}%</strong></div>
           <div class="risk-row">
-            <span class="badge badge-safe">Safe: {{ d.risk_counts.Safe }}</span>
-            <span class="badge badge-risk">At Risk: {{ d.risk_counts['At Risk'] }}</span>
-            <span class="badge badge-danger">Danger: {{ d.risk_counts.Danger }}</span>
+            <span class="badge badge-safe">✅ Safe: {{ d.risk_counts.Safe }}</span>
+            <span class="badge badge-risk">⚠️ At Risk: {{ d.risk_counts['At Risk'] }}</span>
+            <span class="badge badge-danger">🔴 Danger: {{ d.risk_counts.Danger }}</span>
           </div>
         </div>
         {% endfor %}

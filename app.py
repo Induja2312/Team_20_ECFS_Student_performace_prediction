@@ -1,11 +1,12 @@
 from flask import Flask, request, jsonify, render_template, send_file
 import pandas as pd
+import io
 import os
 import json
 import joblib
 from datetime import datetime
 from model.train import run_training, FEATURE_COLS
-from model.predict import predict_student, WEIGHTS, get_risk_level, get_improvement_tips
+from model.predict import predict_student, WEIGHTS, get_risk_level, get_improvement_tips, get_attendance_feedback
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
@@ -79,17 +80,35 @@ def upload():
     # skip header row if first cell is text
     if not str(df.iloc[0, 0]).strip().replace('.','').isdigit():
         df = df.iloc[1:].reset_index(drop=True)
-    # map columns by position same as train.py
-    col_names = ['name', 'attendance', 'marks', 'study_hours', 'assignments_completed', 'result']
-    if df.shape[1] > 6:
-        col_names += [f'extra_{i}' for i in range(df.shape[1] - 6)]
-    df.columns = col_names
-    df = df[['name', 'attendance', 'marks', 'study_hours', 'assignments_completed', 'result']]
+    # capture original column count BEFORE any mapping
+    orig_cols = df.shape[1]
+    # map columns by position — assignments_completed and class are optional
+    if df.shape[1] >= 7:
+        col_names = ['name', 'attendance', 'marks', 'study_hours', 'assignments_completed', 'class', 'result']
+        if df.shape[1] > 7:
+            col_names += [f'extra_{i}' for i in range(df.shape[1] - 7)]
+        df.columns = col_names
+    elif df.shape[1] == 6:
+        col_names = ['name', 'attendance', 'marks', 'study_hours', 'assignments_completed', 'result']
+        df.columns = col_names
+        df['class'] = ''
+    else:
+        df.columns = ['name', 'attendance', 'marks', 'study_hours', 'result']
+        df['assignments_completed'] = 5
+        df['class'] = ''
+    df = df[['name', 'attendance', 'marks', 'study_hours', 'assignments_completed', 'class', 'result']]
     for col in FEATURE_COLS:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-    df = df.dropna(subset=FEATURE_COLS)
+    df['assignments_completed'] = df['assignments_completed'].fillna(5)
+    df = df.dropna(subset=['attendance', 'marks', 'study_hours'])
     if len(df) > 10000:
         df = df.sample(n=10000, random_state=42).reset_index(drop=True)
+
+    # has_assignments = True only if the original CSV actually had that column
+    # 5-col: name,att,marks,study,result — no assignments
+    # 6-col: name,att,marks,study,assignments,result — has assignments
+    # 7-col: name,att,marks,study,assignments,class,result — has assignments
+    has_assignments = orig_cols >= 6
 
     model = joblib.load('model/saved_model.pkl')
 
@@ -110,14 +129,21 @@ def upload():
             'assignments_completed': float(row['assignments_completed'])
         }
         name = str(row['name']) if 'name' in df.columns else f"Student {i + 1}"
+        prediction = 'Pass' if conf >= 50 else 'Fail'
+        now = datetime.now()
         predictions.append({
             'name': name,
+            'class': str(row.get('class', '')),
             **sdata,
-            'prediction': 'Pass' if conf >= 50 else 'Fail',
+            'has_assignments': has_assignments,
+            'prediction': prediction,
             'confidence': conf,
-            'risk_level': get_risk_level(conf),
+            'risk_level': get_risk_level(prediction, sdata['attendance']),
+            'feedback': get_attendance_feedback(sdata['attendance'], sdata['marks'], sdata['study_hours']),
             'improvement_tips': get_improvement_tips(sdata),
-            'story': make_student_story(name, sdata['marks'], sdata['attendance'], sdata['study_hours'])
+            'story': make_student_story(name, sdata['marks'], sdata['attendance'], sdata['study_hours']),
+            'date': now.strftime('%Y-%m-%d'),
+            'time': now.strftime('%H:%M:%S')
         })
 
     risk_counts = {
@@ -141,17 +167,42 @@ def upload():
     return jsonify(response)
 
 
+def validate_predict_input(data):
+    """Returns dict of field-level errors, or empty dict if valid."""
+    errors = {}
+    required = {'attendance': 'Attendance is required',
+                 'marks': 'Marks are required',
+                 'study_hours': 'Study Hours are required'}
+    for field, msg in required.items():
+        if data.get(field) in (None, ''):
+            errors[field] = msg
+            continue
+        try:
+            val = float(data[field])
+        except (ValueError, TypeError):
+            errors[field] = f'{field.replace("_", " ").title()} must be a number'
+            continue
+        if field in ('attendance', 'marks') and not (0 <= val <= 100):
+            errors[field] = f'{field.replace("_", " ").title()} must be between 0 and 100'
+        elif field == 'study_hours' and val < 0:
+            errors[field] = 'Study Hours must be >= 0'
+    return errors
+
+
 @app.route('/predict_single', methods=['POST'])
 def predict_single():
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
+    errors = validate_predict_input(data)
+    if errors:
+        return jsonify({'error': errors}), 400
     try:
         result = predict_student({
             'attendance': float(data['attendance']),
             'marks': float(data['marks']),
             'study_hours': float(data['study_hours']),
-            'assignments_completed': float(data['assignments_completed'])
+            'assignments_completed': float(data['assignments_completed']) if data.get('assignments_completed') not in (None, '') else 0
         })
         return jsonify(result)
     except Exception as e:
@@ -164,14 +215,45 @@ def history():
     for fname in sorted(os.listdir(HISTORY_FOLDER), reverse=True):
         if fname.endswith('.json'):
             with open(os.path.join(HISTORY_FOLDER, fname)) as f:
-                sessions.append(json.load(f))
+                session = json.load(f)
+            ts = session.get('timestamp', '')
+            # parse date and time from timestamp string YYYYMMDD_HHMMSS
+            try:
+                dt = datetime.strptime(ts, '%Y%m%d_%H%M%S')
+                session['date'] = dt.strftime('%d %B %Y')
+                session['time'] = dt.strftime('%I:%M:%S %p')
+            except Exception:
+                session['date'] = ts
+                session['time'] = ''
+            sessions.append(session)
     return render_template('history.html', sessions=sessions)
+
+
+@app.route('/history_api')
+def history_api():
+    records = []
+    for fname in sorted(os.listdir(HISTORY_FOLDER), reverse=True):
+        if fname.endswith('.json'):
+            with open(os.path.join(HISTORY_FOLDER, fname)) as f:
+                session = json.load(f)
+            for p in session.get('data', {}).get('predictions', []):
+                records.append({
+                    'name': p.get('name', ''),
+                    'attendance': p.get('attendance', ''),
+                    'marks': p.get('marks', ''),
+                    'study_hours': p.get('study_hours', ''),
+                    'prediction': p.get('prediction', ''),
+                    'risk_level': p.get('risk_level', ''),
+                    'feedback': p.get('feedback', ''),
+                    'date': p.get('date', ''),
+                    'time': p.get('time', '')
+                })
+    return jsonify(records)
 
 
 @app.route('/download_report', methods=['POST'])
 def download_report():
     data = request.get_json()
-    school = data.get('school_name', 'EduPredict School')
     predictions = data.get('predictions', [])
     risk_counts = data.get('risk_counts', {})
     rf_acc = data.get('rf_accuracy', 'N/A')
@@ -185,41 +267,141 @@ def download_report():
     elems = []
 
     elems.append(Paragraph("EduPredict — Student Performance Report", styles['Title']))
-    elems.append(Paragraph(f"School: {school}", styles['Normal']))
     elems.append(Paragraph(f"Date: {datetime.now().strftime('%d %B %Y')}", styles['Normal']))
     elems.append(Spacer(1, 12))
-    elems.append(Paragraph(f"Random Forest Accuracy: {rf_acc}%", styles['Normal']))
-    elems.append(Paragraph(f"Logistic Regression Accuracy: {lr_acc}%", styles['Normal']))
-    elems.append(Spacer(1, 12))
-    elems.append(Paragraph("Risk Distribution:", styles['Heading2']))
 
-    for level, count in risk_counts.items():
-        elems.append(Paragraph(f"  {level}: {count} student(s)", styles['Normal']))
-    elems.append(Spacer(1, 12))
+    has_class = any(p.get('class', '').strip() for p in predictions)
 
-    rows = [['Name', 'Marks', 'Attendance', 'Prediction', 'Confidence', 'Risk']]
-    for p in predictions:
-        rows.append([
-            p.get('name', ''),
-            p.get('marks', ''),
-            p.get('attendance', ''),
-            p.get('prediction', ''),
-            f"{p.get('confidence', '')}%",
-            p.get('risk_level', '')
-        ])
+    tbl_style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a1a2e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')])
+    ])
 
-    tbl = Table(rows, repeatRows=1)
-    tbl.setStyle(TableStyle([
+    if has_class:
+        from collections import defaultdict
+        grouped = defaultdict(list)
+        for p in predictions:
+            grouped[p.get('class', '').strip() or 'Unknown'].append(p)
+
+        for cls in sorted(grouped.keys()):
+            group = grouped[cls]
+            elems.append(Paragraph(f"Class: {cls}", styles['Heading2']))
+            safe   = sum(1 for p in group if p.get('risk_level') == 'Safe')
+            at_risk= sum(1 for p in group if p.get('risk_level') == 'At Risk')
+            danger = sum(1 for p in group if p.get('risk_level') == 'Danger')
+            elems.append(Paragraph(
+                f"Students: {len(group)}  |  Safe: {safe}  |  At Risk: {at_risk}  |  Danger: {danger}",
+                styles['Normal']
+            ))
+            elems.append(Spacer(1, 6))
+            rows = [['Name', 'Class', 'Marks', 'Attendance', 'Prediction', 'Confidence', 'Risk']]
+            for p in group:
+                rows.append([p.get('name',''), p.get('class',''), p.get('marks',''),
+                              p.get('attendance',''), p.get('prediction',''),
+                              f"{p.get('confidence','')}%", p.get('risk_level','')])
+            tbl = Table(rows, repeatRows=1)
+            tbl.setStyle(tbl_style)
+            elems.append(tbl)
+            elems.append(Spacer(1, 16))
+    else:
+        rows = [['Name', 'Marks', 'Attendance', 'Study Hours', 'Prediction', 'Confidence', 'Risk', 'Feedback']]
+        for p in predictions:
+            rows.append([p.get('name',''), p.get('marks',''), p.get('attendance',''),
+                         p.get('study_hours',''), p.get('prediction',''),
+                         f"{p.get('confidence','')}%", p.get('risk_level',''),
+                         p.get('feedback','')])
+        tbl = Table(rows, repeatRows=1, colWidths=[70, 35, 50, 45, 50, 55, 40, None])
+        tbl.setStyle(tbl_style)
+        elems.append(tbl)
+
+    # Risk Analysis Summary
+    total = len(predictions)
+    safe_c   = risk_counts.get('Safe', 0)
+    risk_c   = risk_counts.get('At Risk', 0)
+    danger_c = risk_counts.get('Danger', 0)
+    elems.append(Spacer(1, 20))
+    elems.append(Paragraph("Risk Analysis Summary", styles['Heading2']))
+    summary_data = [
+        ['Metric', 'Count'],
+        ['Total Students', str(total)],
+        ['SAFE', str(safe_c)],
+        ['AT RISK', str(risk_c)],
+        ['DANGER', str(danger_c)],
+    ]
+    summary_tbl = Table(summary_data, colWidths=[160, 80])
+    summary_tbl.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a1a2e')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
         ('FONTSIZE', (0, 0), (-1, -1), 9),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')])
+        ('BACKGROUND', (0, 2), (-1, 2), colors.HexColor('#fff3cd')),
+        ('BACKGROUND', (0, 3), (-1, 3), colors.HexColor('#f8d7da')),
     ]))
-    elems.append(tbl)
+    elems.append(summary_tbl)
+    elems.append(Spacer(1, 16))
+    elems.append(Paragraph("Model Accuracy", styles['Heading2']))
+    acc_data = [
+        ['Model', 'Accuracy'],
+        ['Random Forest', f'{rf_acc}%'],
+        ['Logistic Regression', f'{lr_acc}%'],
+    ]
+    acc_tbl = Table(acc_data, colWidths=[160, 80])
+    acc_tbl.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a1a2e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+    ]))
+    elems.append(acc_tbl)
 
     doc.build(elems)
     return send_file(fpath, as_attachment=True, download_name=fname)
+
+
+@app.route('/download-csv', methods=['POST'])
+def download_csv():
+    data = request.get_json()
+    predictions = data.get('predictions', [])
+    risk_counts = data.get('risk_counts', {})
+
+    lines = ['Name,Attendance,Marks,Study Hours,Prediction,Risk,Feedback,Date,Time']
+    for p in predictions:
+        row = [
+            str(p.get('name', '')),
+            str(p.get('attendance', '')),
+            str(p.get('marks', '')),
+            str(p.get('study_hours', '')),
+            str(p.get('prediction', '')),
+            str(p.get('risk_level', '')),
+            f'"{p.get("feedback", "").replace(chr(34), chr(39))}"',
+            str(p.get('date', '')),
+            str(p.get('time', ''))
+        ]
+        lines.append(','.join(row))
+
+    total = len(predictions)
+    lines += [
+        '',
+        '--- Risk Analysis Summary ---',
+        f'Total Students,{total}',
+        f'SAFE,{risk_counts.get("Safe", 0)}',
+        f'AT RISK,{risk_counts.get("At Risk", 0)}',
+        f'DANGER,{risk_counts.get("Danger", 0)}'
+    ]
+
+    output = io.BytesIO('\n'.join(lines).encode('utf-8'))
+    output.seek(0)
+    fname = f"EduPredict_Results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return send_file(output, mimetype='text/csv', as_attachment=True, download_name=fname)
+
+
+@app.route('/download-pdf', methods=['POST'])
+def download_pdf():
+    return download_report()
 
 
 if __name__ == '__main__':

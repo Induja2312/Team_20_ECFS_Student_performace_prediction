@@ -20,14 +20,33 @@ def load_model():
     return model, WEIGHTS
 
 
-def get_risk_level(confidence):
-    # i split this into 3 zones based on how confident
-    # the model is that the student will pass
-    if confidence > 75:
+def get_risk_level(prediction, attendance):
+    """Classify risk using ML prediction + attendance."""
+    if prediction == 'Pass' and attendance >= 75:
         return 'Safe'
-    elif confidence >= 50:
+    if (prediction == 'Pass' and 50 <= attendance < 75) or \
+       (prediction == 'Fail' and attendance >= 60):
         return 'At Risk'
     return 'Danger'
+
+
+def get_attendance_feedback(attendance, marks, study_hours):
+    if attendance >= 75:
+        base = "Good attendance. Keep it up!"
+    elif attendance >= 60:
+        base = "Slightly low attendance. Needs improvement."
+    elif attendance >= 50:
+        base = "Low attendance. Immediate attention required."
+    elif attendance >= 20:
+        base = "Critically low attendance. High risk of failure."
+    else:
+        base = "Severely low attendance. Urgent intervention needed."
+
+    if attendance < 60 and marks < 50:
+        base += " Low attendance and low marks indicate high risk of failing."
+    elif attendance < 60 and study_hours < 4:
+        base += " Low attendance combined with insufficient study hours is concerning."
+    return base
 
 
 def get_improvement_tips(data):
@@ -44,8 +63,10 @@ def get_improvement_tips(data):
     elif marks < 60:
         tips.append("Marks are low. Target at least 60 to be safe.")
 
-    if attendance < 75:
+    if attendance < 50:
         tips.append("Attendance is critically low. Attend all remaining classes.")
+    elif attendance < 75:
+        tips.append("Attendance is below 75%. Try to attend more classes.")
 
     if study < 4:
         tips.append("Increase study hours to at least 4 hours per week.")
@@ -63,15 +84,17 @@ def predict_student(data):
         data['attendance'] * weights['attendance'],
         data['marks'] * weights['marks'],
         data['study_hours'] * weights['study_hours'],
-        data['assignments_completed'] * weights['assignments_completed']
+        data.get('assignments_completed', 5) * weights['assignments_completed']
     ]]
 
     proba = model.predict_proba(weighted_input)[0]
     pass_conf = round(proba[1] * 100, 2)
 
+    prediction = 'Pass' if pass_conf >= 50 else 'Fail'
     return {
-        'prediction': 'Pass' if pass_conf >= 50 else 'Fail',
+        'prediction': prediction,
         'confidence': pass_conf,
-        'risk_level': get_risk_level(pass_conf),
+        'risk_level': get_risk_level(prediction, data['attendance']),
+        'feedback': get_attendance_feedback(data['attendance'], data['marks'], data['study_hours']),
         'improvement_tips': get_improvement_tips(data)
     }

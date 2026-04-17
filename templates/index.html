@@ -68,7 +68,8 @@
         </div>
         <div class="upload-hint">
           Required columns: <code>name</code>, <code>attendance</code>, <code>marks</code>,
-          <code>study_hours</code>, <code>assignments_completed</code>, <code>result</code>
+          <code>study_hours</code>, <code>result</code> &nbsp;·&nbsp;
+          <code>assignments_completed</code> and <code>class</code> are optional
         </div>
         <button class="btn btn-primary btn-lg" onclick="uploadCSV()" id="uploadBtn">
           🚀 Upload & Predict
@@ -146,6 +147,11 @@
               <option value="At Risk">At Risk</option>
               <option value="Danger">Danger</option>
             </select>
+            <span id="classFilterWrap" style="display:none">
+              <select id="filterClass" onchange="filterTable()">
+                <option value="">All Classes</option>
+              </select>
+            </span>
           </div>
           <button class="btn btn-outline" onclick="downloadTableCSV()">⬇️ Download CSV</button>
         </div>
@@ -155,17 +161,19 @@
             <thead>
               <tr>
                 <th onclick="sortTable(0)">Name ↕</th>
-                <th onclick="sortTable(1)">Attendance (%) ↕</th>
-                <th onclick="sortTable(2)">Marks ↕</th>
-                <th onclick="sortTable(3)">Study Hours ↕</th>
-                <th onclick="sortTable(4)">Assignments ↕</th>
-                <th onclick="sortTable(5)">Prediction ↕</th>
+                <th id="thClass" style="display:none" onclick="sortTable(1)">Class ↕</th>
+                <th onclick="sortTable(2)">Attendance (%) ↕</th>
+                <th onclick="sortTable(3)">Marks ↕</th>
+                <th onclick="sortTable(4)">Study Hours ↕</th>
+                <th onclick="sortTable(5)">Assignments ↕</th>
+                <th onclick="sortTable(6)">Prediction ↕</th>
                 <th>Risk Level</th>
                 <th>Confidence</th>
+                <th>Feedback</th>
               </tr>
             </thead>
             <tbody id="resultsBody">
-              <tr><td colspan="8" class="empty-row">No data yet. Upload a CSV to see results.</td></tr>
+              <tr><td colspan="9" class="empty-row">No data yet. Upload a CSV to see results.</td></tr>
             </tbody>
           </table>
         </div>
@@ -177,6 +185,36 @@
       <div class="page-header">
         <h1>Analytics Dashboard</h1>
         <p>Visual summary of model performance and student risk distribution.</p>
+      </div>
+
+      <!-- Class Filter for Dashboard -->
+      <div id="dashClassFilterWrap" style="display:none;margin-bottom:1rem">
+        <label style="font-size:0.85rem;font-weight:600;color:var(--muted);margin-right:0.6rem">🏫 Filter by Class:</label>
+        <select id="dashFilterClass" onchange="fillDashboard(lastResponse)" style="border:1.5px solid var(--border);border-radius:8px;padding:0.4rem 0.8rem;font-size:0.85rem;background:white;color:var(--text);outline:none">
+          <option value="">All Classes</option>
+        </select>
+      </div>
+
+      <!-- Risk Summary Cards -->
+      <div class="stats-grid risk-stats-grid" id="riskStatsGrid" style="display:none">
+        <div class="stat-card" style="border-top:3px solid var(--success)">
+          <div class="stat-icon">✅</div>
+          <div class="stat-value" id="statSafe" style="color:var(--success)">—</div>
+          <div class="stat-label">Safe</div>
+          <div style="font-size:0.78rem;color:var(--muted)" id="statSafePct"></div>
+        </div>
+        <div class="stat-card" style="border-top:3px solid var(--warning)">
+          <div class="stat-icon">⚠️</div>
+          <div class="stat-value" id="statAtRisk" style="color:var(--warning)">—</div>
+          <div class="stat-label">At Risk</div>
+          <div style="font-size:0.78rem;color:var(--muted)" id="statAtRiskPct"></div>
+        </div>
+        <div class="stat-card" style="border-top:3px solid var(--danger)">
+          <div class="stat-icon">🔴</div>
+          <div class="stat-value" id="statDanger" style="color:var(--danger)">—</div>
+          <div class="stat-label">Danger</div>
+          <div style="font-size:0.78rem;color:var(--muted)" id="statDangerPct"></div>
+        </div>
       </div>
 
       <!-- Summary Cards -->
@@ -218,6 +256,25 @@
         <div class="card chart-card">
           <div class="card-title">Feature Importance</div>
           <canvas id="featureBarChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Class-wise Charts -->
+      <div id="classChartsSection" style="display:none">
+        <div class="section-title" style="margin:1.5rem 0 1rem">🏫 Class-wise Analytics</div>
+        <div class="charts-row">
+          <div class="card chart-card">
+            <div class="card-title">Risk Distribution by Class</div>
+            <canvas id="classRiskChart"></canvas>
+          </div>
+          <div class="card chart-card">
+            <div class="card-title">Pass vs Fail by Class</div>
+            <canvas id="classPassChart"></canvas>
+          </div>
+        </div>
+        <div class="card chart-card" style="margin-bottom:1.5rem">
+          <div class="card-title">Average Attendance, Marks &amp; Study Hours by Class</div>
+          <canvas id="classAvgChart" style="max-height:260px"></canvas>
         </div>
       </div>
 
@@ -273,8 +330,11 @@
               <input type="number" id="m_study_hours" min="0" max="20" placeholder="e.g. 5"/>
             </div>
             <div class="form-group">
-              <label>Assignments Completed (out of 10)</label>
-              <input type="number" id="m_assignments" min="0" max="10" placeholder="e.g. 7"/>
+              <label>
+                Assignments Completed
+                <span style="font-weight:400;color:var(--muted);font-size:0.78rem">(optional, out of 10)</span>
+              </label>
+              <input type="number" id="m_assignments" min="0" max="10" placeholder="Leave blank to skip"/>
             </div>
           </div>
           <button class="btn btn-primary btn-lg btn-full" onclick="manualPredict()">
@@ -312,10 +372,6 @@
           <div class="report-icon">📄</div>
           <div class="report-title">PDF Report</div>
           <div class="report-desc">Download a formatted PDF report with summary table, accuracy scores, and risk distribution.</div>
-          <div class="form-group" style="margin-bottom:1rem">
-            <label>School Name</label>
-            <input type="text" id="schoolName" placeholder="Enter your school name"/>
-          </div>
           <button class="btn btn-primary btn-lg" onclick="downloadReport()">⬇️ Download PDF</button>
         </div>
       </div>
